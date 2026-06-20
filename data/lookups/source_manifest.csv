@@ -1,0 +1,14 @@
+id,source_type,locator,file_regex,dest_subdir,unzip,vintage,geo,variable,notes
+elec_1988_t1,datagouv_api,elections-presidentielles-1965-2012-1,1988t1.*commp9000,elections,FALSE,1988,commune,votes,Communes >9000 inhab only (CDSP)
+elec_1988_t2,datagouv_api,elections-presidentielles-1965-2012-1,1988t2.*commp9000,elections,FALSE,1988,commune,votes,Communes >9000 inhab only (CDSP)
+elec_1995_t1,datagouv_api,elections-presidentielles-1965-2012-1,1995t1.*commp9000,elections,FALSE,1995,commune,votes,Communes >9000 inhab only (CDSP); 1995 t2 has no commune file
+cog_passage,datagouv_api,table-de-passage-geographie-2022,passage-geo-2022.txt,census,FALSE,2022,commune,crosswalk,COG commune harmonization table
+census_act_iris_2012,insee_fichier,https://www.insee.fr/fr/statistiques/fichier/2028654/infra-activite-resident-2012.zip,,census,TRUE,2012,iris,csp,Verified 200 (older naming)
+census_act_iris_2017,insee_fichier,https://www.insee.fr/fr/statistiques/fichier/4799323/base-ic-activite-residents-2017_csv.zip,,census,TRUE,2017,iris,csp,Verified 200
+census_act_iris_2021,insee_fichier,https://www.insee.fr/fr/statistiques/fichier/8268843/base-ic-activite-residents-2021_csv.zip,,census,TRUE,2021,iris,csp,Verified 200
+census_dip_iris_2021,insee_fichier,https://www.insee.fr/fr/statistiques/fichier/8268840/base-ic-diplomes-formation-2021_csv.zip,,census,TRUE,2021,iris,education,Verified 200
+census_dip_com_2012,insee_fichier,https://www.insee.fr/fr/statistiques/fichier/2044707/base-cc-diplomes-formation_2012.zip,,census,TRUE,2012,commune,education,Verified 200 (commune-level)
+census_dip_com_2017,insee_fichier,https://www.insee.fr/fr/statistiques/fichier/4516086/base-ccc-diplomes-formation-2017.zip,,census,TRUE,2017,commune,education,Commune-level (IRIS diplomes 2017 not published separately)
+income_filo_iris_2021,insee_fichier,https://www.insee.fr/fr/statistiques/fichier/8229323/BASE_TD_FILO_IRIS_2021_DISP_CSV.zip,,census,TRUE,2021,iris,income,Verified 200 (disposable income, median)
+commune_geo,direct,https://raw.githubusercontent.com/gregoiredavid/france-geojson/master/communes.geojson,,census,FALSE,2022,commune,geometry,Commune polygons -> area for density
+filo_grid_2019,datagouv_api,donnees-carroyees-a-200-m-sur-la-population,Filosofi.*200m.*(gpkg|7z|zip),census,TRUE,2019,grid,income_pop,Dasymetric weight layer for Tier B (best-effort resolve)

@@ -1,0 +1,29 @@
+Package: FrenchElectionAnalysis
+Title: Changing Electoral Coalitions of the French Left (1988-2022)
+Version: 0.1.0
+Authors@R: person("Logan", "Summerlin", role = c("aut", "cre"))
+Description: Reproducible pipeline that builds a two-tier dataset linking French
+    presidential election results (commune and bureau-de-vote level) to INSEE
+    census and income data, for analyzing the socioeconomic composition of the
+    French Left vote across the last seven presidential elections.
+License: MIT
+Encoding: UTF-8
+Imports:
+    here,
+    fs,
+    curl,
+    jsonlite,
+    readr,
+    dplyr,
+    tidyr,
+    stringr,
+    stringi,
+    purrr,
+    arrow,
+    sf,
+    janitor
+Suggests:
+    areal,
+    targets,
+    ggplot2,
+    broom

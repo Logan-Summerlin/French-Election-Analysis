@@ -1,0 +1,32 @@
+# Raw + interim data (large, re-downloadable) — never commit
+data/raw/
+data/interim/
+
+# Large processed geo/interpolation intermediates
+data/processed/*.gpkg
+data/processed/*.geojson
+data/processed/*.parquet
+
+# Built outputs are large; keep CSV samples out of git by default.
+# Comment the next two lines if you want to commit the final outputs (or use Git LFS).
+outputs/*.parquet
+outputs/tierB_*.csv
+
+# R
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+renv/library/
+renv/local/
+renv/cellar/
+renv/lock/
+*.Rproj
+
+# targets pipeline store
+_targets/
+
+# OS / editor
+.DS_Store
+.Rproj.user
+*.swp

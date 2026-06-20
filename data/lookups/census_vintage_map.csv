@@ -1,0 +1,8 @@
+election_year,census_vintage,income_vintage,income_source,notes
+1988,1990,,,Nearest general census (RP1990); no localized income for this era
+1995,1999,,,Between RP1990 and RP1999; RP1999 marginally closer
+2002,1999,2001,DGFiP_RFL,RP1999; Revenus Fiscaux Localises ~2001 optional/sparse
+2007,2006,2007,DGFiP_RFL,First rolling-census millesime (2006); RFL 2007
+2012,2012,2012,INSEE_Filosofi,RP2012 + Filosofi 2012 (first Filosofi millesime)
+2017,2017,2017,INSEE_Filosofi,RP2017 + Filosofi 2017
+2022,2021,2021,INSEE_Filosofi,Latest available RP/Filosofi millesime at build time (2021/2022)
