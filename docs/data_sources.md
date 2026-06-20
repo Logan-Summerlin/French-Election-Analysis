@@ -3,6 +3,25 @@
 All sources are open and free. URLs verified against the data.gouv.fr / INSEE
 catalogues in June 2026.
 
+## Automated fetching — `data/lookups/source_manifest.csv`
+
+All downloads are now driven by a manifest consumed by `R/01_download.R`
+(`download_from_manifest()`); `Rscript run_all.R` fetches everything with **no
+manual file placement**. Each row resolves by `source_type`:
+- `datagouv_api` — resolve the dataset slug via `https://www.data.gouv.fr/api/1/datasets/<slug>/`
+  and pick the resource whose filename/title matches `file_regex` (auto-adapts to
+  re-versioned files). Used for historical elections and the COG crosswalk.
+- `insee_fichier` — `locator` is the full `https://www.insee.fr/fr/statistiques/fichier/<id>/<name>.zip`
+  URL (one place to bump a millésime). Used for census + income.
+- `direct` — plain URL (election parquet, bv contours, commune geometry).
+
+Downloads are idempotent, retried with backoff, unzipped when flagged, and any
+**single failed URL is logged and skipped** (never aborts the run). Verified INSEE
+file IDs baked into the manifest: activité/CSP IRIS 2012 `2028654`, 2017 `4799323`,
+2021 `8268843`; diplômes 2012 `2044707` (commune), 2017 `4516086` (commune),
+2021 IRIS `8268840`; Filosofi income IRIS 2021 `8229323`. To add a vintage, append
+a manifest row — no code change.
+
 ## 1–2. Election results (Ministry of the Interior, via data.gouv.fr)
 
 Dataset: **"Données des élections agrégées"**
@@ -20,14 +39,22 @@ coverage at bureau-de-vote level (confirmed by querying the parquet):**
 `inscrits, votants, abstentions, blancs, nuls, exprimes`.
 **Note:** `nuance` is empty for 2017 & 2022 → the Left lookup keys on surname.
 
-### 1988 & 1995 (not in the open aggregated dataset)
-Obtain commune-level results from one of:
-- **CDSP / Sciences Po** election data archive (`data.sciencespo.fr`).
-- Ministry of the Interior historical archives
-  (`elections.interieur.gouv.fr/resultats-de-toutes-elections`).
-Place as `data/raw/elections/historical_1988.csv` / `historical_1995.csv` with
-columns `code_commune, nom, prenom, voix, inscrits, votants, exprimes, year, round`.
-`R/02_clean_elections.R::read_historical_commune()` ingests them.
+### 1988 & 1995 — now fetched automatically (CDSP)
+Source: data.gouv dataset **"Elections présidentielles 1965-2012"**
+(slug `elections-presidentielles-1965-2012-1`, originally CDSP/Sciences Po).
+`download_historical_elections()` (R/01) resolves and downloads:
+- `cdsp_presi1988t1_commp9000.csv`, `cdsp_presi1988t2_commp9000.csv`,
+  `cdsp_presi1995t1_commp9000.csv`.
+
+`R/02_clean_elections.R::parse_cdsp_commune()` melts the wide `SURNAME (PARTY)`
+columns to long and reconstructs the 5-char INSEE commune code from
+`Code département` + `Numéro commune`; the surname feeds the existing Left lookup.
+
+**Hard limitations of this open source (flagged in `coverage` column / caveats):**
+- Commune files cover **only communes > 9 000 inhabitants** → urban-biased.
+- **1995 round 2 has no commune file** (circonscription only) → absent.
+Full-coverage commune results for these years require a registered CDSP download
+and are out of scope for automated fetching.
 
 ## 3. Bureau de vote contours (polygons)
 

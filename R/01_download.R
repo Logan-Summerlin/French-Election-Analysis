@@ -59,34 +59,83 @@ download_contours <- function(overwrite = FALSE) {
   download_one("bv_contours", URLS$bv_contours_geojson, "contours", overwrite)
 }
 
-# Census / income / COG: print instructions; these require picking the right
-# millesime archive from the INSEE landing page (URLs rotate each release).
-download_census_manual <- function() {
-  msg <- c(
-    "",
-    "==== CENSUS / INCOME / COG: place files in data/raw/census/ ====",
-    "INSEE archive URLs change each millesime, so resolve them from these pages:",
-    sprintf("  IRIS census (CSP/diplome/pop): %s", URLS$census_iris_landing),
-    sprintf("  Commune census (legal pop)   : %s", URLS$census_commune_landing),
-    sprintf("  Filosofi IRIS income         : %s", URLS$filosofi_iris_landing),
-    sprintf("  Filosofi 200m grid           : %s", URLS$filosofi_grid_landing),
-    sprintf("  COG commune crosswalk        : %s", URLS$cog_landing),
-    "",
-    "Expected filenames (per vintage in census_vintage_map.csv), e.g.:",
-    "  data/raw/census/base-ic-activite-residents-<YYYY>.csv     (CSP / activity, IRIS)",
-    "  data/raw/census/base-ic-diplomes-formation-<YYYY>.csv     (education, IRIS)",
-    "  data/raw/census/base-cc-evol-struct-pop-<YYYY>.csv        (population, commune)",
-    "  data/raw/census/BTX_TD_FILO_DISP_IRIS_<YYYY>.csv          (Filosofi income, IRIS)",
-    "  data/raw/census/Filosofi<YYYY>_carreaux_200m_met.gpkg     (Filosofi income grid)",
-    "  data/raw/census/table-passage-communes-<YYYY>.csv         (COG crosswalk)",
-    "  data/raw/census/communes-<GEO_REF_YEAR>.gpkg              (commune polygons, areas)",
-    "================================================================", ""
-  )
-  cat(msg, sep = "\n")
+# --- Manifest-driven census / income / COG / historical-election fetch ----
+# Replaces the old manual instructions. Driven by data/lookups/source_manifest.csv.
+# Each row resolves to a URL by `source_type`:
+#   datagouv_api : resolve the dataset slug via the data.gouv API, pick the
+#                  resource whose filename/title matches `file_regex`.
+#   insee_fichier: `locator` IS the full /fichier/<id>/<name>.zip URL.
+#   direct       : plain URL.
+# Robust by design: each row is HEAD-checked, retried with backoff, unzipped if
+# flagged, and FAILURES ARE LOGGED AND SKIPPED so one stale URL never aborts the run.
+
+resolve_datagouv <- function(slug, file_regex) {
+  api <- sprintf("https://www.data.gouv.fr/api/1/datasets/%s/", slug)
+  js  <- jsonlite::fromJSON(api, simplifyVector = FALSE)
+  res <- js$resources
+  url <- vapply(res, function(r) r$url %||% "", character(1))
+  ttl <- vapply(res, function(r) r$title %||% "", character(1))
+  key <- paste(basename(url), ttl)
+  hit <- which(grepl(file_regex, key, ignore.case = TRUE, perl = TRUE))
+  if (length(hit) == 0) stop("no resource matching /", file_regex, "/ in '", slug, "'")
+  url[[hit[1]]]
 }
+
+unzip_if_needed <- function(path, dest_dir, do_unzip) {
+  if (isTRUE(do_unzip) && grepl("\\.zip$", path, ignore.case = TRUE)) {
+    tryCatch(utils::unzip(path, exdir = dest_dir, overwrite = TRUE),
+             error = function(e) message("  unzip failed: ", conditionMessage(e)))
+  }
+}
+
+download_from_manifest <- function(manifest = file.path(PATHS$lookups, "source_manifest.csv"),
+                                   ids = NULL) {
+  man <- readr::read_csv(manifest, show_col_types = FALSE)
+  if (!is.null(ids)) man <- man[man$id %in% ids, ]
+  for (i in seq_len(nrow(man))) {
+    row <- man[i, ]
+    url <- tryCatch(switch(row$source_type,
+        datagouv_api  = resolve_datagouv(row$locator, row$file_regex),
+        insee_fichier = row$locator,
+        direct        = row$locator,
+        stop("unknown source_type ", row$source_type)),
+      error = function(e) { message("[resolve-fail] ", row$id, ": ", conditionMessage(e)); NA_character_ })
+    if (is.na(url)) next
+
+    dest_dir <- file.path(PATHS$raw, row$dest_subdir); dir.create(dest_dir, recursive = TRUE, showWarnings = FALSE)
+    dest <- file.path(dest_dir, basename(url))
+    if (file.exists(dest) && file.info(dest)$size > 0) {
+      message(sprintf("[skip] %-22s present", row$id))
+    } else {
+      message(sprintf("[get ] %-22s <- %s", row$id, url))
+      ok <- FALSE
+      for (attempt in 1:4) {
+        ok <- tryCatch({ curl::curl_download(url, dest, quiet = TRUE, mode = "wb"); TRUE },
+                       error = function(e) { message("  attempt ", attempt, " failed: ", conditionMessage(e)); FALSE })
+        if (ok) break
+        Sys.sleep(2 ^ attempt)
+      }
+      if (!ok) { message("[FAIL] ", row$id, " — left for manual download"); next }
+    }
+    unzip_if_needed(dest, dest_dir, row$unzip)
+    record_provenance(row$id, url, dest)
+  }
+  invisible(man)
+}
+
+# Convenience wrappers used by run_all.R.
+download_historical_elections <- function()
+  download_from_manifest(ids = c("elec_1988_t1", "elec_1988_t2", "elec_1995_t1"))
+
+download_census <- function()
+  download_from_manifest(ids = c("cog_passage",
+    "census_act_iris_2012","census_act_iris_2017","census_act_iris_2021",
+    "census_dip_iris_2021","census_dip_com_2012","census_dip_com_2017",
+    "income_filo_iris_2021","commune_geo","filo_grid_2019"))
 
 if (sys.nframe() == 0) {
   download_elections()
   download_contours()    # comment out if only building Tier A
-  download_census_manual()
+  download_historical_elections()
+  download_census()
 }

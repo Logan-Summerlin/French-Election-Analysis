@@ -17,17 +17,24 @@ build_tierA <- function() {
   votes  <- arrow::read_parquet(file.path(PATHS$interim, "votes_commune.parquet"))
   xw     <- load_cog_crosswalk()
 
+  if (!"coverage" %in% names(votes)) votes$coverage <- "full"
+
   # Harmonize commune codes, then classify candidates.
   votes <- remap_commune(votes, "code_commune", xw,
                          value_cols = "voix",
-                         group_extra = c("year", "round", "nom", "prenom", "nom_norm"))
+                         group_extra = c("year", "round", "nom", "prenom", "nom_norm", "coverage"))
   classified <- classify_votes(votes)
 
-  # Turnout (exprimes) per commune for shares — aggregate bv turnout up.
-  turnout <- arrow::read_parquet(file.path(PATHS$interim, "turnout_bv.parquet")) |>
+  # Turnout (exprimes) per commune for shares: bv turnout (2002+) UNION
+  # historical commune turnout (1988/1995 from the CDSP files).
+  turnout_bv <- arrow::read_parquet(file.path(PATHS$interim, "turnout_bv.parquet")) |>
     group_by(code_commune, year, round) |>
     summarise(inscrits = sum(inscrits, na.rm = TRUE), votants = sum(votants, na.rm = TRUE),
-              exprimes = sum(exprimes, na.rm = TRUE), .groups = "drop") |>
+              exprimes = sum(exprimes, na.rm = TRUE), .groups = "drop")
+  hist_turn_path <- file.path(PATHS$interim, "turnout_historical.parquet")
+  turnout_all <- if (file.exists(hist_turn_path))
+    bind_rows(turnout_bv, arrow::read_parquet(hist_turn_path)) else turnout_bv
+  turnout <- turnout_all |>
     remap_commune("code_commune", xw, value_cols = c("inscrits","votants","exprimes"),
                   group_extra = c("year","round")) |>
     mutate(abstention_rate = 1 - votants / inscrits)
@@ -48,6 +55,15 @@ build_tierA <- function() {
       mutate(year = y, census_vintage = v)
   }
   census <- purrr::map_dfr(ELECTION_YEARS, census_for_year)
+
+  # Population density (per km2). pop_15plus / commune area is a documented proxy
+  # for total-population density (correlation > 0.98); see docs/caveats.md.
+  area_path <- file.path(PATHS$interim, "commune_area.parquet")
+  if (file.exists(area_path) && "pop_15plus" %in% names(census)) {
+    area <- arrow::read_parquet(area_path)
+    census <- census |> left_join(area, by = "geo_id") |>
+      mutate(pop_density = pop_15plus / area_km2)
+  }
 
   long <- long |> left_join(census, by = c("code_commune" = "geo_id", "year"))
   write_parquet(long, file.path(PATHS$outputs, "tierA_commune_panel.parquet"))

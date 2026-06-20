@@ -63,19 +63,76 @@ clean_turnout_bv <- function() {
 }
 
 # --- Historical commune-level results (1988, 1995) -----------------------
+# Parses the CDSP "communes >9000 inhab" files downloaded by 01_download.R:
+#   cdsp_presi1988t1_commp9000.csv, cdsp_presi1988t2_commp9000.csv,
+#   cdsp_presi1995t1_commp9000.csv
+# Format (confirmed): comma-separated UTF-8, wide, columns:
+#   Code departement, departement, numero commune, commune, Inscrits, Votants,
+#   Exprimes, <one column per candidate named "SURNAME (PARTY)" or "SURNAME">.
+# We melt candidate columns to long; the candidate SURNAME feeds the existing
+# Left lookup join in R/08. Coverage flagged "communes_gt_9000" (urban-biased).
+# 1995 round 2 has no commune file -> absent by construction.
+
+# Build a 5-char INSEE commune code from department + sequential commune number.
+make_commune_code <- function(dep, num) {
+  dep <- toupper(trimws(dep))
+  dep <- ifelse(grepl("^[0-9]+$", dep), formatC(as.integer(dep), width = 2, flag = "0"), dep)
+  paste0(dep, formatC(as.integer(num), width = 3, flag = "0"))
+}
+
+parse_cdsp_commune <- function(path) {
+  m <- regmatches(basename(path), regexec("presi(\\d{4})t(\\d)", basename(path)))[[1]]
+  yr <- as.integer(m[2]); rd <- as.integer(m[3])
+  raw <- read_delim(path, delim = ",", show_col_types = FALSE,
+                    locale = locale(encoding = "UTF-8"),
+                    col_types = cols(.default = col_character()))
+  hdr  <- names(raw)
+  nh   <- tolower(stri_trans_general(hdr, "Latin-ASCII"))
+  dep_col  <- hdr[nh == "code departement"][1]
+  num_col  <- hdr[nh %in% c("numero commune", "no commune")][1]
+  id_set   <- c("code departement","departement","numero commune","no commune",
+                "commune","inscrits","votants","exprimes")
+  cand_cols <- hdr[!(nh %in% id_set) & nzchar(hdr) & !grepl("^\\.{3}", hdr)]
+  cand_cols <- cand_cols[colSums(!is.na(raw[cand_cols])) > 0]   # drop all-empty trailers
+  surname   <- trimws(sub("\\s*\\(.*$", "", cand_cols))         # "LE PEN (FN)" -> "LE PEN"
+
+  df <- raw[, c(dep_col, num_col, cand_cols)]
+  names(df)[1:2] <- c(".dep", ".num")
+  df[cand_cols] <- lapply(df[cand_cols], function(x) suppressWarnings(as.numeric(x)))
+  votes <- df |>
+    tidyr::pivot_longer(all_of(cand_cols), names_to = ".hdr", values_to = "voix") |>
+    filter(!is.na(voix)) |>
+    mutate(year = yr, round = rd,
+           code_commune = make_commune_code(.dep, .num),
+           code_departement = ifelse(grepl("^[0-9]+$", trimws(.dep)),
+                                     formatC(as.integer(.dep), width = 2, flag = "0"), toupper(trimws(.dep))),
+           nom = setNames(surname, cand_cols)[.hdr],
+           nom_norm = norm_name(nom),
+           prenom = NA_character_,
+           coverage = "communes_gt_9000") |>
+    select(year, round, code_departement, code_commune, nom, prenom, nom_norm, voix, coverage)
+
+  # turnout for these communes (inscrits/votants/exprimes) for downstream shares
+  turn <- raw |>
+    transmute(year = yr, round = rd,
+              code_commune = make_commune_code(.data[[dep_col]], .data[[num_col]]),
+              inscrits = suppressWarnings(as.numeric(.data[[hdr[nh == "inscrits"][1]]])),
+              votants  = suppressWarnings(as.numeric(.data[[hdr[nh == "votants"][1]]])),
+              exprimes = suppressWarnings(as.numeric(.data[[hdr[nh == "exprimes"][1]]]))) |>
+    filter(!is.na(exprimes))
+  list(votes = votes, turnout = turn)
+}
+
 read_historical_commune <- function() {
   files <- list.files(file.path(PATHS$raw, "elections"),
-                      pattern = "^historical_\\d{4}\\.csv$", full.names = TRUE)
+                      pattern = "^cdsp_presi\\d{4}t\\d_commp9000\\.csv$", full.names = TRUE)
   if (length(files) == 0) {
-    message("[note] No historical_<year>.csv found for 1988/1995. ",
-            "See docs/data_sources.md to obtain CDSP/Ministry archives.")
-    return(tibble())
+    message("[note] No CDSP commune files for 1988/1995. Run download_historical_elections().")
+    return(list(votes = tibble(), turnout = tibble()))
   }
-  purrr::map_dfr(files, function(f) {
-    read_csv(f, show_col_types = FALSE) |>
-      mutate(code_commune = str_pad(as.character(code_commune), 5, pad = "0"),
-             nom_norm = norm_name(nom))
-  })
+  parsed <- lapply(files, parse_cdsp_commune)
+  list(votes   = bind_rows(lapply(parsed, `[[`, "votes")),
+       turnout = bind_rows(lapply(parsed, `[[`, "turnout")))
 }
 
 # --- Aggregate everything to commune level (all 7 years) -----------------
@@ -83,15 +140,20 @@ clean_votes_commune <- function() {
   bv <- arrow::read_parquet(file.path(PATHS$interim, "votes_bv.parquet"))
   bv_commune <- bv |>
     group_by(year, round, code_departement, code_commune, nom, prenom, nom_norm) |>
-    summarise(voix = sum(voix, na.rm = TRUE), .groups = "drop")
+    summarise(voix = sum(voix, na.rm = TRUE), .groups = "drop") |>
+    mutate(coverage = "full")
 
   hist <- read_historical_commune()
-  commune <- bind_rows(bv_commune, hist) |>
+  if (nrow(hist$turnout) > 0)
+    write_parquet(hist$turnout, file.path(PATHS$interim, "turnout_historical.parquet"))
+
+  commune <- bind_rows(bv_commune, hist$votes) |>
     filter(year %in% ELECTION_YEARS)
 
   write_parquet(commune, file.path(PATHS$interim, "votes_commune.parquet"))
   message("votes_commune: ", nrow(commune), " rows, years ",
-          paste(sort(unique(commune$year)), collapse = ","))
+          paste(sort(unique(commune$year)), collapse = ","),
+          "; historical commune rows: ", nrow(hist$votes))
   invisible(commune)
 }
 

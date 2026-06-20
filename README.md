@@ -54,11 +54,16 @@ Rscript run_all.R tierA
 Rscript run_all.R
 ```
 
-Election results and bureau-de-vote contours download automatically from
-`data.gouv.fr`. INSEE **census, income, and the COG crosswalk** use per-millésime
-archive URLs that rotate each release, so place those files in `data/raw/census/`
-following the printed instructions (`R/01_download.R` → `download_census_manual()`).
-See **[docs/data_sources.md](docs/data_sources.md)** for exact pages and filenames.
+**All sources download automatically** — election results, bureau-de-vote contours,
+the **historical 1988/1995 commune results** (CDSP), and **INSEE census, income, COG,
+and commune geometry** — driven by `data/lookups/source_manifest.csv`
+(`R/01_download.R` → `download_from_manifest()`). No manual file placement. A single
+stale URL is logged and skipped rather than aborting the run; to add a census vintage,
+append one manifest row. See **[docs/data_sources.md](docs/data_sources.md)**.
+
+Two source limits to know (see [docs/caveats.md](docs/caveats.md)): the 1988/1995
+commune files cover **only communes > 9 000 inhabitants** (flagged `coverage`), and
+**1995 round 2** has no commune file.
 
 ## Defining "the Left" — fully editable
 

@@ -64,9 +64,26 @@ build_education <- function(df, id_col) {
 
 # --- Income (Filosofi): median standard of living -----------------------
 build_income <- function(df, id_col) {
-  med <- pick(df, "(DEC_MED|MED_DISP|MED$|Q2)")
+  # Filosofi disposable-income IRIS file: median column is DISP_MEDyy (e.g. DISP_MED21).
+  med <- pick(df, "DISP_MED|DEC_MED|_MED[0-9]|MED_DISP|MEDIANE")
   if (is.null(med)) { warning("No median-income column"); return(NULL) }
   tibble(id = df[[id_col]], median_income = suppressWarnings(as.numeric(df[[med]])))
+}
+
+# Commune polygon areas (km2) from the france-geojson communes layer, used for
+# population density. Vintage-independent; built once.
+build_commune_area <- function() {
+  f <- list.files(CENSUS_DIR, pattern = "communes.*\\.geojson$", full.names = TRUE, ignore.case = TRUE)
+  if (length(f) == 0) { message("[note] commune geometry missing; density will be NA."); return(invisible(NULL)) }
+  suppressPackageStartupMessages(library(sf))
+  g <- sf::st_read(f[1], quiet = TRUE)
+  code_col <- str_subset(names(g), regex("^code$|insee|^id$", ignore_case = TRUE))[1]
+  g <- sf::st_transform(g, CRS_LAMBERT93)
+  out <- tibble(geo_id = as.character(g[[code_col]]),
+                area_km2 = as.numeric(sf::st_area(g)) / 1e6)
+  write_parquet(out, file.path(PATHS$interim, "commune_area.parquet"))
+  message("commune_area: ", nrow(out), " communes")
+  invisible(out)
 }
 
 # --- Driver: build one vintage at a given geography ----------------------
@@ -112,4 +129,5 @@ if (sys.nframe() == 0) {
   vmap <- read_csv(file.path(PATHS$lookups, "census_vintage_map.csv"), show_col_types = FALSE)
   for (v in unique(vmap$census_vintage)) build_census_vintage(v, "commune")
   for (v in intersect(unique(vmap$census_vintage), c(2012, 2017, 2021))) build_census_vintage(v, "iris")
+  build_commune_area()
 }

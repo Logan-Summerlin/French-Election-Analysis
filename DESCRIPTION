@@ -12,6 +12,7 @@ Imports:
     here,
     fs,
     curl,
+    jsonlite,
     readr,
     dplyr,
     tidyr,

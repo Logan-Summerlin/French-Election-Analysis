@@ -45,6 +45,20 @@ The default `left_classification.csv` makes defensible but contestable calls
 Mélenchon's `Front de Gauche` 2012 vs `LFI` 2017/2022). These materially affect totals
 — treat the lookup as a parameter and run sensitivity checks by editing it.
 
-## 8. Scope
+## 8. 1988 & 1995 commune coverage is urban-biased
+The only openly-automatable commune source for these years (CDSP "1965-2012")
+covers **communes > 9 000 inhabitants only**, and **1995 round 2 has no commune
+file at all**. So 1988/1995 Tier A rows are flagged `coverage = "communes_gt_9000"`
+and skew urban; the 1995 second round is absent. Filter on `coverage` when comparing
+across years, and treat early-year socioeconomic gradients with caution. Full-coverage
+data needs a registered CDSP download (not automatable).
+
+## 9. Population density is an adult-population proxy
+`pop_density` is computed as census **population 15+** (`pop_15plus`) divided by
+commune area (km², from the france-geojson commune polygons), not total population.
+The two correlate > 0.98, but the level is biased low where the under-15 share is
+high. Swap in INSEE legal total population for an exact figure if needed.
+
+## 10. Scope
 Metropolitan France only (mainland + Corsica). Overseas departments are excluded;
 their distinct census coverage and voting patterns would need separate handling.

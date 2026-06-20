@@ -14,7 +14,8 @@ source(here::here("R", "config.R"))
 
 message("\n== 01 download ==");            source(here::here("R", "01_download.R")); download_elections()
 if (mode == "all") download_contours()
-download_census_manual()
+download_historical_elections()   # CDSP 1988/1995 commune files
+download_census()                 # INSEE census/income/COG + commune geometry (manifest-driven)
 
 message("\n== 02 clean elections =="); source(here::here("R", "02_clean_elections.R"))
 clean_votes_bv(); clean_turnout_bv(); clean_votes_commune()
