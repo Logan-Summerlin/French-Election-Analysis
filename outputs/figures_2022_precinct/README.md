@@ -48,6 +48,30 @@ precincts — the Mélenchon/LFI metropolitan signature — and the classic *ouv
 correlation has gone negative, consistent with the recomposition of the Left
 coalition.
 
+## Low-income subset & 2002↔2022 comparison
+- `left_vs_higher_ed_bottom30_income_2022.png` — 2022 Left vote vs higher education,
+  restricted to the **bottom 30% of precincts by commune median income** (≤ €21,270;
+  n=18,818). Even among the poorest precincts the gradient is positive (r=+0.45).
+- `left_vs_higher_ed_bottom30_income_2002_vs_2022.png` — **side-by-side** of the same
+  analysis for **2002 vs 2022**. Each election is paired with the **nearest-available
+  INSEE census/Filosofi vintage** (Filosofi income does not exist before 2012):
+  **2002 → 2012 census**, **2022 → 2021 census**. Both the income filter and the
+  higher-education X axis use that election's vintage.
+
+  | election (census) | n | r | OLS slope | weighted Left |
+  |---|---|---|---|---|
+  | 2002 (2012) | 17,588 | +0.21 | +0.11 pp / +1pp | 43.9% |
+  | 2022 (2021) | 18,818 | +0.45 | +0.74 pp / +1pp | 35.8% |
+
+  Among low-income precincts the Left–education link is **much steeper in 2022 than in
+  2002**: in 2002 the Left was broad-based across education levels (flat, weak gradient),
+  whereas by 2022 the Left vote in poor precincts is markedly concentrated in the more
+  educated ones — the metropolitan, graduate-leaning recomposition of the Left.
+
+  Higher-education definition by vintage (both = "Bac+2 and above" / non-schooled 15+):
+  2012 = `(P12_NSCOL15P_BACP2 + P12_NSCOL15P_SUP) / P12_NSCOL15P`;
+  2021 = `(P21_NSCOL15P_SUP2 + P21_NSCOL15P_SUP34 + P21_NSCOL15P_SUP5) / P21_NSCOL15P`.
+
 ## Reproduce
 ```bash
 python3 analysis/build_bv_2022_dataset.py            # downloads sources -> data/processed/bv_2022_analysis.parquet
