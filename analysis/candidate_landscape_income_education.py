@@ -350,7 +350,8 @@ def label_regions(
     y_grid: np.ndarray,
     candidate_names: list[str],
     colours: list[str],
-) -> None:
+) -> list[plt.Text]:
+    labels: list[plt.Text] = []
     total_cells = surface.size
     for index in np.unique(surface):
         mask = surface == index
@@ -366,8 +367,9 @@ def label_regions(
         row, column = np.unravel_index(np.argmax(distance_transform_edt(region)), region.shape)
         text_colour = readable_text_colour(colours[index])
         outline = "white" if text_colour == "#111111" else "black"
-        x_padding = 0.035 * (x_grid.max() - x_grid.min())
-        y_padding = 0.035 * (y_grid.max() - y_grid.min())
+        # Keep even long names such as "Mélenchon" fully inside the axes.
+        x_padding = 0.075 * (x_grid.max() - x_grid.min())
+        y_padding = 0.050 * (y_grid.max() - y_grid.min())
         text_x = np.clip(x_grid[column], x_grid.min() + x_padding, x_grid.max() - x_padding)
         text_y = np.clip(y_grid[row], y_grid.min() + y_padding, y_grid.max() - y_padding)
         label = ax.text(
@@ -383,6 +385,52 @@ def label_regions(
             clip_on=True,
         )
         label.set_path_effects([path_effects.withStroke(linewidth=2.5, foreground=outline, alpha=0.7)])
+        labels.append(label)
+    return labels
+
+
+def validate_layout(fig: plt.Figure, ax: plt.Axes, region_labels: list[plt.Text]) -> None:
+    """Fail the build if text is clipped by the canvas or plot boundary."""
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    canvas = fig.bbox
+    axes_box = ax.get_window_extent(renderer)
+
+    checked_text = [
+        *fig.texts,
+        ax.title,
+        ax.xaxis.label,
+        ax.yaxis.label,
+        *ax.get_xticklabels(),
+        *ax.get_yticklabels(),
+    ]
+    legend = ax.get_legend()
+    if legend is not None:
+        checked_text.extend(legend.get_texts())
+        checked_text.append(legend.get_title())
+
+    for artist in checked_text:
+        if not artist.get_visible() or not artist.get_text().strip():
+            continue
+        box = artist.get_window_extent(renderer)
+        # Locators can retain ticks just outside the displayed range. They are
+        # not rendered, so exclude them from the canvas-clipping assertion.
+        if artist in ax.get_xticklabels() and not axes_box.overlaps(box):
+            continue
+        if artist in ax.get_yticklabels() and not axes_box.overlaps(box):
+            continue
+        if box.x0 < -1 or box.y0 < -1 or box.x1 > canvas.x1 + 1 or box.y1 > canvas.y1 + 1:
+            raise ValueError(f"Text falls outside figure canvas: {artist.get_text()!r}")
+
+    for artist in region_labels:
+        box = artist.get_window_extent(renderer)
+        if (
+            box.x0 < axes_box.x0 + 2
+            or box.y0 < axes_box.y0 + 2
+            or box.x1 > axes_box.x1 - 2
+            or box.y1 > axes_box.y1 - 2
+        ):
+            raise ValueError(f"Candidate label is clipped by plot boundary: {artist.get_text()!r}")
 
 
 def plot_landscape(
@@ -435,7 +483,7 @@ def plot_landscape(
         rasterized=True,
         zorder=2,
     )
-    label_regions(ax, surface, x_grid, y_grid, candidate_names, colours)
+    region_labels = label_regions(ax, surface, x_grid, y_grid, candidate_names, colours)
 
     subtitle = "central 90% of each demographic axis" if trimmed else "complete matched sample"
     fig.text(
@@ -494,11 +542,17 @@ def plot_landscape(
         color="#555555",
     )
     fig.subplots_adjust(left=0.10, right=0.81, top=0.79, bottom=0.13)
+    validate_layout(fig, ax, region_labels)
 
     suffix = "central90" if trimmed else "full"
     out_dir.mkdir(parents=True, exist_ok=True)
     output = out_dir / f"leading_candidate_income_education_{year}_{suffix}.png"
-    fig.savefig(output, dpi=160, facecolor="white")
+    fig.savefig(
+        output,
+        dpi=150,
+        facecolor="white",
+        pil_kwargs={"optimize": True, "compress_level": 9},
+    )
     plt.close(fig)
     print(f"saved {output} ({len(plotted):,} precincts)")
     return {
