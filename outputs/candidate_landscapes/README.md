@@ -7,10 +7,10 @@ the first round of the French presidential elections in 2002 and 2022.
 
 - `leading_candidate_income_education_2002_full.png`
 - `leading_candidate_income_education_2002_central90.png`
-- `leading_candidate_income_education_2002_central90_k25_winning_share.png`
+- `leading_candidate_income_education_2002_central90_k25.png`
 - `leading_candidate_income_education_2022_full.png`
 - `leading_candidate_income_education_2022_central90.png`
-- `leading_candidate_income_education_2022_central90_k25_winning_share.png`
+- `leading_candidate_income_education_2022_central90_k25.png`
 
 The **full** version uses every matched metropolitan-France precinct with at
 least 50 valid first-round votes. The **central90** version independently finds
@@ -18,11 +18,9 @@ the 5th and 95th percentiles of median income and higher-education share, then
 drops any precinct outside either interval and rescales both axes to the retained
 sample.
 
-The **central90_k25_winning_share** versions use the same trimmed samples and
-axes but average over the 25 nearest precincts. Their continuous fill shows the
-highest candidate mean at each grid cell; direct labels identify the candidates'
-largest leading regions. Each election's colour scale is rounded outward to the
-nearest five percentage points so its within-year variation remains legible.
+The **central90_k25** versions use the same trimmed samples, axes, and candidate
+colours, but average over the 25 nearest precincts rather than 100. The smaller
+neighbourhood produces narrower, more locally responsive candidate clusters.
 
 ## How the background is calculated
 
@@ -31,14 +29,13 @@ At every point on a regular income–education grid, the script:
 1. standardises median income and higher-education share within the plotted
    sample;
 2. finds the requested number of nearest precincts in that two-dimensional space
-   (100 for the categorical figures and 25 for the winning-share figures);
+   (100 for the original figures and 25 for the narrower-cluster variants);
 3. takes each candidate's mean first-round vote share across those precincts;
-4. colours the cell either for the candidate with the highest mean or by the
-   value of that winning mean.
+4. colours the cell for the candidate with the highest mean.
 
 Black dots show the underlying precincts. Direct labels are placed in candidates'
-largest substantial regions; on the categorical figures, the legend lists every
-candidate that wins at least one grid cell.
+largest substantial regions; the legend lists every candidate that wins at least
+one grid cell.
 
 ## Data and interpretation
 
