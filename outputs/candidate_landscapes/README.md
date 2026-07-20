@@ -1,14 +1,16 @@
 # Leading candidate by income and education — 2002 and 2022
 
-These four figures reproduce an Economist-style candidate-winner landscape for
+These six figures reproduce an Economist-style candidate-winner landscape for
 the first round of the French presidential elections in 2002 and 2022.
 
 ## Figures
 
 - `leading_candidate_income_education_2002_full.png`
 - `leading_candidate_income_education_2002_central90.png`
+- `leading_candidate_income_education_2002_central90_k25_winning_share.png`
 - `leading_candidate_income_education_2022_full.png`
 - `leading_candidate_income_education_2022_central90.png`
+- `leading_candidate_income_education_2022_central90_k25_winning_share.png`
 
 The **full** version uses every matched metropolitan-France precinct with at
 least 50 valid first-round votes. The **central90** version independently finds
@@ -16,19 +18,27 @@ the 5th and 95th percentiles of median income and higher-education share, then
 drops any precinct outside either interval and rescales both axes to the retained
 sample.
 
+The **central90_k25_winning_share** versions use the same trimmed samples and
+axes but average over the 25 nearest precincts. Their continuous fill shows the
+highest candidate mean at each grid cell; direct labels identify the candidates'
+largest leading regions. Each election's colour scale is rounded outward to the
+nearest five percentage points so its within-year variation remains legible.
+
 ## How the background is calculated
 
 At every point on a regular income–education grid, the script:
 
 1. standardises median income and higher-education share within the plotted
    sample;
-2. finds the 100 nearest precincts in that two-dimensional space;
+2. finds the requested number of nearest precincts in that two-dimensional space
+   (100 for the categorical figures and 25 for the winning-share figures);
 3. takes each candidate's mean first-round vote share across those precincts;
-4. colours the cell for the candidate with the highest mean.
+4. colours the cell either for the candidate with the highest mean or by the
+   value of that winning mean.
 
 Black dots show the underlying precincts. Direct labels are placed in candidates'
-largest substantial regions; the legend lists every candidate that wins at least
-one grid cell.
+largest substantial regions; on the categorical figures, the legend lists every
+candidate that wins at least one grid cell.
 
 ## Data and interpretation
 
@@ -54,5 +64,5 @@ python3 analysis/candidate_landscape_income_education.py
 ```
 
 The first run downloads roughly 270 MB of source archives. Downloaded and
-processed data remain under gitignored locations; the four PNGs and
+processed data remain under gitignored locations; the six PNGs and
 `build_summary.csv` are committed outputs.

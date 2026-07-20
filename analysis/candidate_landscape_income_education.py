@@ -5,16 +5,17 @@ For the 2002 and 2022 French presidential first rounds, this script:
 
 1. joins bureau-de-vote results to commune-level INSEE income and education;
 2. evaluates a regular income/education grid;
-3. finds the 100 precincts nearest each grid point after standardising the two
+3. finds the precincts nearest each grid point after standardising the two
    demographic axes; and
-4. colours the grid by the candidate with the highest mean first-round vote
-   share among those neighbours.
+4. colours the grid either by the candidate with the highest mean first-round
+   vote share or by that winning mean vote share.
 
-Two figures are written per election: the complete matched sample and a central
-90-percent-axis version that excludes observations outside either variable's
-5th--95th percentile range.  To follow the repository's established comparison,
-2002 is paired with the earliest Filosofi vintage (2012) and 2012 education,
-while 2022 is paired with 2021 Filosofi and census education.
+Three figures are written per election: categorical complete-sample and central
+90-percent-axis versions based on 100 nearest precincts, plus a central-90%
+continuous winning-vote-share version based on 25 nearest precincts. To follow
+the repository's established comparison, 2002 is paired with the earliest
+Filosofi vintage (2012) and 2012 education, while 2022 is paired with 2021
+Filosofi and census education.
 
 The election result is precinct-level.  Income and education are commune-level
 attributes attached to each precinct, so the figures are ecological summaries,
@@ -24,6 +25,7 @@ not estimates of individual voter behaviour.
 from __future__ import annotations
 
 import argparse
+from io import BytesIO
 import os
 from pathlib import Path
 import subprocess
@@ -35,11 +37,12 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.patheffects as path_effects
 import matplotlib.pyplot as plt
-from matplotlib.colors import ListedColormap
+from matplotlib.colors import ListedColormap, Normalize
 from matplotlib.patches import Patch
 from matplotlib.ticker import FuncFormatter
 import numpy as np
 import pandas as pd
+from PIL import Image
 import pyarrow.parquet as pq
 from scipy.ndimage import distance_transform_edt, label as connected_components
 from scipy.spatial import cKDTree
@@ -306,7 +309,7 @@ def winner_surface(
     neighbours: int,
     nx: int,
     ny: int,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     x = data["median_income"].to_numpy(float)
     y = data["higher_ed_pct"].to_numpy(float)
     x_grid = np.linspace(x.min(), x.max(), nx)
@@ -322,6 +325,7 @@ def winner_surface(
     shares = data[candidate_names].to_numpy(dtype="float32")
     k = min(neighbours, len(data))
     winners = np.empty(len(queries), dtype=np.int16)
+    winning_shares = np.empty(len(queries), dtype=np.float32)
 
     chunk_size = 4_000
     for start in range(0, len(queries), chunk_size):
@@ -334,7 +338,8 @@ def winner_surface(
             neighbour_index = neighbour_index[:, None]
         mean_shares = shares[neighbour_index].mean(axis=1)
         winners[start:stop] = np.argmax(mean_shares, axis=1)
-    return winners.reshape(ny, nx), x_grid, y_grid
+        winning_shares[start:stop] = np.max(mean_shares, axis=1)
+    return winners.reshape(ny, nx), winning_shares.reshape(ny, nx), x_grid, y_grid
 
 
 def readable_text_colour(hex_colour: str) -> str:
@@ -350,6 +355,7 @@ def label_regions(
     y_grid: np.ndarray,
     candidate_names: list[str],
     colours: list[str],
+    fixed_text_colour: str | None = None,
 ) -> list[plt.Text]:
     labels: list[plt.Text] = []
     total_cells = surface.size
@@ -365,7 +371,7 @@ def label_regions(
         if region.sum() < 0.008 * total_cells:
             continue
         row, column = np.unravel_index(np.argmax(distance_transform_edt(region)), region.shape)
-        text_colour = readable_text_colour(colours[index])
+        text_colour = fixed_text_colour or readable_text_colour(colours[index])
         outline = "white" if text_colour == "#111111" else "black"
         # Keep even long names such as "Mélenchon" fully inside the axes.
         x_padding = 0.075 * (x_grid.max() - x_grid.min())
@@ -396,18 +402,21 @@ def validate_layout(fig: plt.Figure, ax: plt.Axes, region_labels: list[plt.Text]
     canvas = fig.bbox
     axes_box = ax.get_window_extent(renderer)
 
-    checked_text = [
-        *fig.texts,
-        ax.title,
-        ax.xaxis.label,
-        ax.yaxis.label,
-        *ax.get_xticklabels(),
-        *ax.get_yticklabels(),
-    ]
-    legend = ax.get_legend()
-    if legend is not None:
-        checked_text.extend(legend.get_texts())
-        checked_text.append(legend.get_title())
+    checked_text = [*fig.texts]
+    for figure_axis in fig.axes:
+        checked_text.extend(
+            [
+                figure_axis.title,
+                figure_axis.xaxis.label,
+                figure_axis.yaxis.label,
+                *figure_axis.get_xticklabels(),
+                *figure_axis.get_yticklabels(),
+            ]
+        )
+        legend = figure_axis.get_legend()
+        if legend is not None:
+            checked_text.extend(legend.get_texts())
+            checked_text.append(legend.get_title())
 
     for artist in checked_text:
         if not artist.get_visible() or not artist.get_text().strip():
@@ -415,9 +424,17 @@ def validate_layout(fig: plt.Figure, ax: plt.Axes, region_labels: list[plt.Text]
         box = artist.get_window_extent(renderer)
         # Locators can retain ticks just outside the displayed range. They are
         # not rendered, so exclude them from the canvas-clipping assertion.
-        if artist in ax.get_xticklabels() and not axes_box.overlaps(box):
+        if any(
+            artist in figure_axis.get_xticklabels()
+            and not figure_axis.get_window_extent(renderer).overlaps(box)
+            for figure_axis in fig.axes
+        ):
             continue
-        if artist in ax.get_yticklabels() and not axes_box.overlaps(box):
+        if any(
+            artist in figure_axis.get_yticklabels()
+            and not figure_axis.get_window_extent(renderer).overlaps(box)
+            for figure_axis in fig.axes
+        ):
             continue
         if box.x0 < -1 or box.y0 < -1 or box.x1 > canvas.x1 + 1 or box.y1 > canvas.y1 + 1:
             raise ValueError(f"Text falls outside figure canvas: {artist.get_text()!r}")
@@ -433,6 +450,34 @@ def validate_layout(fig: plt.Figure, ax: plt.Axes, region_labels: list[plt.Text]
             raise ValueError(f"Candidate label is clipped by plot boundary: {artist.get_text()!r}")
 
 
+def save_verified_png(fig: plt.Figure, output: Path, palette_colours: int | None = None) -> None:
+    """Render in memory and refuse to retain a damaged PNG."""
+    buffer = BytesIO()
+    fig.savefig(
+        buffer,
+        format="png",
+        dpi=150,
+        facecolor="white",
+        pil_kwargs={"optimize": True, "compress_level": 9},
+    )
+    contents = buffer.getvalue()
+    with Image.open(BytesIO(contents)) as image:
+        image.verify()
+    if palette_colours is not None:
+        with Image.open(BytesIO(contents)) as image:
+            quantized = image.convert("RGB").quantize(
+                colors=palette_colours,
+                method=Image.Quantize.MEDIANCUT,
+                dither=Image.Dither.FLOYDSTEINBERG,
+            )
+            compact = BytesIO()
+            quantized.save(compact, format="PNG", optimize=True, compress_level=9)
+        contents = compact.getvalue()
+    output.write_bytes(contents)
+    with Image.open(output) as image:
+        image.verify()
+
+
 def plot_landscape(
     data: pd.DataFrame,
     candidate_names: list[str],
@@ -442,6 +487,7 @@ def plot_landscape(
     out_dir: Path,
     neighbours: int,
     grid_size: int,
+    shade_by_winning_share: bool = False,
 ) -> dict[str, float | int | str]:
     original_n = len(data)
     if trimmed:
@@ -455,24 +501,40 @@ def plot_landscape(
         plotted = data.copy()
 
     ny = max(180, int(grid_size * 0.68))
-    surface, x_grid, y_grid = winner_surface(
+    surface, winning_shares, x_grid, y_grid = winner_surface(
         plotted, candidate_names, neighbours=neighbours, nx=grid_size, ny=ny
     )
     colours = candidate_colours(candidate_names)
 
     fig, ax = plt.subplots(figsize=(12, 8))
-    ax.imshow(
-        surface,
-        origin="lower",
-        aspect="auto",
-        interpolation="nearest",
-        extent=[x_grid.min(), x_grid.max(), y_grid.min(), y_grid.max()],
-        cmap=ListedColormap(colours),
-        vmin=-0.5,
-        vmax=len(candidate_names) - 0.5,
-        alpha=0.82,
-        zorder=0,
-    )
+    image_extent = [x_grid.min(), x_grid.max(), y_grid.min(), y_grid.max()]
+    if shade_by_winning_share:
+        share_floor = 5 * np.floor(winning_shares.min() / 5)
+        share_ceiling = 5 * np.ceil(winning_shares.max() / 5)
+        share_norm = Normalize(vmin=share_floor, vmax=share_ceiling)
+        image = ax.imshow(
+            winning_shares,
+            origin="lower",
+            aspect="auto",
+            interpolation="nearest",
+            extent=image_extent,
+            cmap="viridis",
+            norm=share_norm,
+            zorder=0,
+        )
+    else:
+        image = ax.imshow(
+            surface,
+            origin="lower",
+            aspect="auto",
+            interpolation="nearest",
+            extent=image_extent,
+            cmap=ListedColormap(colours),
+            vmin=-0.5,
+            vmax=len(candidate_names) - 0.5,
+            alpha=0.82,
+            zorder=0,
+        )
     ax.scatter(
         plotted["median_income"],
         plotted["higher_ed_pct"],
@@ -483,14 +545,26 @@ def plot_landscape(
         rasterized=True,
         zorder=2,
     )
-    region_labels = label_regions(ax, surface, x_grid, y_grid, candidate_names, colours)
+    region_labels = label_regions(
+        ax,
+        surface,
+        x_grid,
+        y_grid,
+        candidate_names,
+        colours,
+        fixed_text_colour="#FFFFFF" if shade_by_winning_share else None,
+    )
 
     subtitle = "central 90% of each demographic axis" if trimmed else "complete matched sample"
     fig.text(
         0.10,
         0.965,
         f"France {year} presidential election — first round\n"
-        "Leading candidate by local income and education",
+        + (
+            "Local winning vote share by income and education"
+            if shade_by_winning_share
+            else "Leading candidate by local income and education"
+        ),
         ha="left",
         va="top",
         fontsize=20,
@@ -500,7 +574,9 @@ def plot_landscape(
     fig.text(
         0.10,
         0.855,
-        f"{subtitle}; income and education vintage: INSEE {census_vintage}",
+        f"{subtitle}; "
+        + (f"{neighbours} nearest precincts; " if shade_by_winning_share else "")
+        + f"income and education vintage: INSEE {census_vintage}",
         ha="left",
         va="top",
         fontsize=10.5,
@@ -514,27 +590,41 @@ def plot_landscape(
     ax.tick_params(labelsize=10)
 
     winner_indices = sorted(np.unique(surface), key=lambda i: candidate_names[i])
-    legend = [
-        Patch(facecolor=colours[index], edgecolor="none", label=candidate_names[index].title())
-        for index in winner_indices
-    ]
-    ax.legend(
-        handles=legend,
-        title="Surface winner",
-        loc="upper left",
-        bbox_to_anchor=(1.012, 1),
-        borderaxespad=0,
-        frameon=False,
-        fontsize=10,
-        title_fontsize=10,
-    )
+    if shade_by_winning_share:
+        colour_axis = fig.add_axes([0.835, 0.28, 0.022, 0.43])
+        colour_bar = fig.colorbar(image, cax=colour_axis)
+        colour_bar.set_label(
+            "Mean vote share of local winner (%)",
+            fontsize=10,
+            fontweight="bold",
+            labelpad=10,
+        )
+        colour_bar.ax.tick_params(labelsize=9)
+    else:
+        legend = [
+            Patch(facecolor=colours[index], edgecolor="none", label=candidate_names[index].title())
+            for index in winner_indices
+        ]
+        ax.legend(
+            handles=legend,
+            title="Surface winner",
+            loc="upper left",
+            bbox_to_anchor=(1.012, 1),
+            borderaxespad=0,
+            frameon=False,
+            fontsize=10,
+            title_fontsize=10,
+        )
 
     retained = len(plotted) / original_n
+    label_note = "; labels identify the local leader" if shade_by_winning_share else ""
+    footnote_break = "\n" if shade_by_winning_share else " "
     fig.text(
         0.01,
         0.012,
         f"Each cell shows the highest mean vote share among the {neighbours} nearest precincts in "
-        "standardised income–education space. Dots are precincts. "
+        f"standardised income–education space.{footnote_break}"
+        f"Dots are precincts{label_note}. "
         f"n={len(plotted):,} ({retained:.1%} of matched precincts).",
         ha="left",
         va="bottom",
@@ -545,14 +635,11 @@ def plot_landscape(
     validate_layout(fig, ax, region_labels)
 
     suffix = "central90" if trimmed else "full"
+    if shade_by_winning_share:
+        suffix += f"_k{neighbours}_winning_share"
     out_dir.mkdir(parents=True, exist_ok=True)
     output = out_dir / f"leading_candidate_income_education_{year}_{suffix}.png"
-    fig.savefig(
-        output,
-        dpi=150,
-        facecolor="white",
-        pil_kwargs={"optimize": True, "compress_level": 9},
-    )
+    save_verified_png(fig, output, palette_colours=256 if shade_by_winning_share else None)
     plt.close(fig)
     print(f"saved {output} ({len(plotted):,} precincts)")
     return {
@@ -564,6 +651,10 @@ def plot_landscape(
         "income_max": float(plotted["median_income"].max()),
         "education_min": float(plotted["higher_ed_pct"].min()),
         "education_max": float(plotted["higher_ed_pct"].max()),
+        "neighbours": neighbours,
+        "fill": "winning vote share" if shade_by_winning_share else "candidate",
+        "winning_share_min": float(winning_shares.min()),
+        "winning_share_max": float(winning_shares.max()),
         "surface_winners": ", ".join(candidate_names[index].title() for index in winner_indices),
     }
 
@@ -574,6 +665,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--processed-dir", type=Path, default=DEFAULT_PROCESSED)
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--neighbours", type=int, default=100)
+    parser.add_argument("--share-neighbours", type=int, default=25)
     parser.add_argument("--grid-size", type=int, default=320)
     return parser.parse_args()
 
@@ -606,6 +698,19 @@ def main() -> int:
                     grid_size=args.grid_size,
                 )
             )
+        summaries.append(
+            plot_landscape(
+                data,
+                candidates,
+                year=year,
+                census_vintage=YEAR_CONFIG[year]["census_vintage"],
+                trimmed=True,
+                out_dir=args.out_dir,
+                neighbours=args.share_neighbours,
+                grid_size=args.grid_size,
+                shade_by_winning_share=True,
+            )
+        )
 
     summary_path = args.out_dir / "build_summary.csv"
     pd.DataFrame(summaries).to_csv(summary_path, index=False)
