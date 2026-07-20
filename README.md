@@ -86,6 +86,9 @@ with 0 unmatched candidates.
 - `outputs/tierA_commune_wide.(parquet|csv)` — per commune × year × round: Left aggregates + census
 - `outputs/tierB_bureau_de_vote*.parquet` — same at bureau-de-vote level, 2002–2022
 - `outputs/data_dictionary.md` — every column documented
+- `outputs/candidate_landscapes/` — 2002 and 2022 first-round leading-candidate
+  landscapes by median income and higher-education share, with full-sample and
+  central-90% variants
 
 **Scope:** Metropolitan France (mainland + Corsica). **Caveat:** these are
 ecological (aggregate) relationships, not individual vote behavior — see
