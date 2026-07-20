@@ -5,16 +5,17 @@ For the 2002 and 2022 French presidential first rounds, this script:
 
 1. joins bureau-de-vote results to commune-level INSEE income and education;
 2. evaluates a regular income/education grid;
-3. finds the 100 precincts nearest each grid point after standardising the two
+3. finds the precincts nearest each grid point after standardising the two
    demographic axes; and
 4. colours the grid by the candidate with the highest mean first-round vote
    share among those neighbours.
 
-Two figures are written per election: the complete matched sample and a central
-90-percent-axis version that excludes observations outside either variable's
-5th--95th percentile range.  To follow the repository's established comparison,
-2002 is paired with the earliest Filosofi vintage (2012) and 2012 education,
-while 2022 is paired with 2021 Filosofi and census education.
+Three figures are written per election: categorical complete-sample and central
+90-percent-axis versions based on 100 nearest precincts, plus a more locally
+sensitive central-90% version based on 25 nearest precincts. To follow the
+repository's established comparison, 2002 is paired with the earliest Filosofi
+vintage (2012) and 2012 education, while 2022 is paired with 2021 Filosofi and
+census education.
 
 The election result is precinct-level.  Income and education are commune-level
 attributes attached to each precinct, so the figures are ecological summaries,
@@ -24,6 +25,7 @@ not estimates of individual voter behaviour.
 from __future__ import annotations
 
 import argparse
+from io import BytesIO
 import os
 from pathlib import Path
 import subprocess
@@ -40,6 +42,7 @@ from matplotlib.patches import Patch
 from matplotlib.ticker import FuncFormatter
 import numpy as np
 import pandas as pd
+from PIL import Image
 import pyarrow.parquet as pq
 from scipy.ndimage import distance_transform_edt, label as connected_components
 from scipy.spatial import cKDTree
@@ -433,6 +436,34 @@ def validate_layout(fig: plt.Figure, ax: plt.Axes, region_labels: list[plt.Text]
             raise ValueError(f"Candidate label is clipped by plot boundary: {artist.get_text()!r}")
 
 
+def save_verified_png(fig: plt.Figure, output: Path, palette_colours: int | None = None) -> None:
+    """Render in memory and refuse to retain a damaged PNG."""
+    buffer = BytesIO()
+    fig.savefig(
+        buffer,
+        format="png",
+        dpi=150,
+        facecolor="white",
+        pil_kwargs={"optimize": True, "compress_level": 9},
+    )
+    contents = buffer.getvalue()
+    with Image.open(BytesIO(contents)) as image:
+        image.verify()
+    if palette_colours is not None:
+        with Image.open(BytesIO(contents)) as image:
+            quantized = image.convert("RGB").quantize(
+                colors=palette_colours,
+                method=Image.Quantize.MEDIANCUT,
+                dither=Image.Dither.FLOYDSTEINBERG,
+            )
+            compact = BytesIO()
+            quantized.save(compact, format="PNG", optimize=True, compress_level=9)
+        contents = compact.getvalue()
+    output.write_bytes(contents)
+    with Image.open(output) as image:
+        image.verify()
+
+
 def plot_landscape(
     data: pd.DataFrame,
     candidate_names: list[str],
@@ -442,6 +473,7 @@ def plot_landscape(
     out_dir: Path,
     neighbours: int,
     grid_size: int,
+    output_suffix: str | None = None,
 ) -> dict[str, float | int | str]:
     original_n = len(data)
     if trimmed:
@@ -500,7 +532,9 @@ def plot_landscape(
     fig.text(
         0.10,
         0.855,
-        f"{subtitle}; income and education vintage: INSEE {census_vintage}",
+        f"{subtitle}; "
+        + (f"{neighbours} nearest precincts; " if output_suffix else "")
+        + f"income and education vintage: INSEE {census_vintage}",
         ha="left",
         va="top",
         fontsize=10.5,
@@ -545,14 +579,11 @@ def plot_landscape(
     validate_layout(fig, ax, region_labels)
 
     suffix = "central90" if trimmed else "full"
+    if output_suffix:
+        suffix += f"_{output_suffix}"
     out_dir.mkdir(parents=True, exist_ok=True)
     output = out_dir / f"leading_candidate_income_education_{year}_{suffix}.png"
-    fig.savefig(
-        output,
-        dpi=150,
-        facecolor="white",
-        pil_kwargs={"optimize": True, "compress_level": 9},
-    )
+    save_verified_png(fig, output, palette_colours=256 if output_suffix else None)
     plt.close(fig)
     print(f"saved {output} ({len(plotted):,} precincts)")
     return {
@@ -564,6 +595,7 @@ def plot_landscape(
         "income_max": float(plotted["median_income"].max()),
         "education_min": float(plotted["higher_ed_pct"].min()),
         "education_max": float(plotted["higher_ed_pct"].max()),
+        "neighbours": neighbours,
         "surface_winners": ", ".join(candidate_names[index].title() for index in winner_indices),
     }
 
@@ -574,6 +606,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--processed-dir", type=Path, default=DEFAULT_PROCESSED)
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--neighbours", type=int, default=100)
+    parser.add_argument("--variant-neighbours", type=int, default=25)
     parser.add_argument("--grid-size", type=int, default=320)
     return parser.parse_args()
 
@@ -606,6 +639,19 @@ def main() -> int:
                     grid_size=args.grid_size,
                 )
             )
+        summaries.append(
+            plot_landscape(
+                data,
+                candidates,
+                year=year,
+                census_vintage=YEAR_CONFIG[year]["census_vintage"],
+                trimmed=True,
+                out_dir=args.out_dir,
+                neighbours=args.variant_neighbours,
+                grid_size=args.grid_size,
+                output_suffix=f"k{args.variant_neighbours}",
+            )
+        )
 
     summary_path = args.out_dir / "build_summary.csv"
     pd.DataFrame(summaries).to_csv(summary_path, index=False)
